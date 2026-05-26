@@ -2,7 +2,7 @@
 
 `Ceas.eCard.SDK.dll` este un assembly .NET Framework 4.x, nu o librarie Java/JAR. In Java nu poate fi importat direct cu Maven/Gradle; varianta stabila este un bridge local .NET care incarca SDK-ul oficial si returneaza JSON catre aplicatia Java.
 
-DLL-urile SDK (`Ceas.eCard.SDK.dll`, `Newtonsoft.Json.dll`, `BouncyCastle.Crypto.dll`) sunt dependinte locale/vendor si nu sunt puse in Git. Pastreaza-le local in `eCard.SDK.1.3.0.4`.
+DLL-urile SDK (`Ceas.eCard.SDK.dll`, `Newtonsoft.Json.dll`, `BouncyCastle.Crypto.dll`) sunt incluse in repo in `eCard.SDK.1.3.0.4`, ca dependinte vendor necesare la build/runtime. Arhiva ZIP originala si artefactele generate raman ignorate.
 
 ## Structura
 
