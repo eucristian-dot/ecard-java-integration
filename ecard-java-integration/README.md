@@ -74,8 +74,20 @@ Codul Java este compatibil cu Java 7. `pom.xml` este inclus pentru proiecte Mave
 
 1. Compileaza bridge-ul si livreaza folderul `bridge\bin` impreuna cu aplicatia Java.
 2. In aplicatia Java, configureaza o cale absoluta catre `ECardBridge.exe`.
-3. Apeleaza `ECardBridgeClient.terminals()`, `status(...)`, `read(...)` sau `activate(...)`.
+3. Foloseste `ECardSdkWrapper`, nu `ProcessBuilder` direct.
 4. Parseaza JSON-ul returnat cu Jackson/Gson daca ai deja una dintre librarii in proiect.
 5. Pastreaza driverele cititorului smartcard si serviciul PC/SC active pe statia unde ruleaza aplicatia.
 
 Codurile de camp sunt cele expuse de enum-ul SDK `CoduriCampuriCard`: `A1` ... `T4`. Fara documentatia oficiala a profilului de card, bridge-ul lasa aplicatia Java sa specifice explicit lista de campuri citite.
+
+Exemplu de cod Java:
+
+```java
+Path bridge = Paths.get("C:\\path\\to\\ECardBridge.exe");
+ECardSdkWrapper ecard = new ECardSdkWrapper(bridge);
+
+String statusJson = ecard.getStatusJson();
+String cardJson = ecard.readCardJson("ECARD_PIN", null, "A1", "A2", "A3");
+```
+
+`ECardSdkWrapper` este wrapperul Java al proiectului. El foloseste `ECardBridge.exe` intern si returneaza JSON, astfel incat aplicatia Java nu trebuie sa cunoasca detaliile .NET SDK.

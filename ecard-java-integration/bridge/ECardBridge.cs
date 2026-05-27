@@ -1,10 +1,12 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Text;
 using Newtonsoft.Json;
 using Novensys.eCard.SDK;
+using Novensys.eCard.SDK.Entities;
 using Novensys.eCard.SDK.Entities.SmartCard;
 using Novensys.eCard.SDK.PCSC;
 
@@ -35,12 +37,14 @@ namespace RoSiui.ECardBridge
                     PrintJson(new Dictionary<string, object>
                     {
                         { "ok", true },
-                        { "commands", new[] { "terminals", "readers", "status", "read", "activate" } },
+                        { "commands", new[] { "terminals", "readers", "status", "token", "read", "activate" } },
                         { "examples", new[]
                             {
                                 "ECardBridge.exe terminals",
                                 "ECardBridge.exe readers",
                                 "ECardBridge.exe status --reader \"ACS ACR39U ICC Reader\"",
+                                "ECardBridge.exe token --reader \"ACS ACR83U\" --um-host 213.177.18.123 --um-port 443 --cui 4283325 --contract AOPSNAJ --contract-date 2014-06-29 --cas A45 --tip-furnizor CMG",
+                                "ECardBridge.exe read --pin-terminal --fields A1,A2,A3",
                                 "ECardBridge.exe read --pin-env ECARD_PIN --fields A1,A2,A3",
                                 "ECardBridge.exe activate --pin-env ECARD_PIN"
                             }
@@ -76,10 +80,14 @@ namespace RoSiui.ECardBridge
                 {
                     return WithCardSession(parsed.Options, delegate(ISesiuneCard session)
                     {
+                        Dictionary<string, object> authorization = PrepareSessionAuthorization(session, parsed.Options);
                         string pin = ResolvePin(parsed.Options);
                         if (String.IsNullOrEmpty(pin))
                         {
-                            throw new ArgumentException("Missing PIN. Use --pin-env ECARD_PIN or --pin 1234.");
+                            if (!UseTerminalPin(parsed.Options))
+                            {
+                                throw new ArgumentException("Missing PIN. Use --pin-terminal, --pin-env ECARD_PIN or --pin 1234.");
+                            }
                         }
 
                         List<CoduriCampuriCard> fields = ParseFields(GetOption(parsed.Options, "fields", null));
@@ -95,6 +103,7 @@ namespace RoSiui.ECardBridge
                             { "ok", ok },
                             { "responseCode", responseCode },
                             { "responseName", EnumName(typeof(CoduriRaspunsOperatieCard), responseCode) },
+                            { "authorization", authorization },
                             { "fieldsRequested", EnumNames(fields) },
                             { "fieldResponses", DescribeFieldResponses(fieldResponses) },
                             { "cardData", FlattenCardData(cardData) }
@@ -104,14 +113,33 @@ namespace RoSiui.ECardBridge
                     });
                 }
 
+                if (command == "token")
+                {
+                    return WithCardSession(parsed.Options, delegate(ISesiuneCard session)
+                    {
+                        Dictionary<string, object> authorization = PrepareSessionAuthorization(session, parsed.Options);
+                        PrintJson(new Dictionary<string, object>
+                        {
+                            { "ok", true },
+                            { "authorization", authorization },
+                            { "status", DescribeSession(session) }
+                        });
+                        return 0;
+                    });
+                }
+
                 if (command == "activate")
                 {
                     return WithCardSession(parsed.Options, delegate(ISesiuneCard session)
                     {
+                        Dictionary<string, object> authorization = PrepareSessionAuthorization(session, parsed.Options);
                         string pin = ResolvePin(parsed.Options);
                         if (String.IsNullOrEmpty(pin))
                         {
-                            throw new ArgumentException("Missing PIN. Use --pin-env ECARD_PIN or --pin 1234.");
+                            if (!UseTerminalPin(parsed.Options))
+                            {
+                                throw new ArgumentException("Missing PIN. Use --pin-terminal, --pin-env ECARD_PIN or --pin 1234.");
+                            }
                         }
 
                         int responseCode = session.ActiveazaCard(pin);
@@ -121,7 +149,8 @@ namespace RoSiui.ECardBridge
                         {
                             { "ok", ok },
                             { "responseCode", responseCode },
-                            { "responseName", EnumName(typeof(CoduriRaspunsOperatieCard), responseCode) }
+                            { "responseName", EnumName(typeof(CoduriRaspunsOperatieCard), responseCode) },
+                            { "authorization", authorization }
                         });
 
                         return ok ? 0 : 2;
@@ -227,6 +256,64 @@ namespace RoSiui.ECardBridge
             }
         }
 
+        private static Dictionary<string, object> PrepareSessionAuthorization(ISesiuneCard session, Dictionary<string, string> options)
+        {
+            string token = GetOption(options, "token", null);
+            if (!String.IsNullOrWhiteSpace(token))
+            {
+                session.Token = token;
+                return new Dictionary<string, object>
+                {
+                    { "mode", "provided-token" },
+                    { "tokenLength", token.Length }
+                };
+            }
+
+            if (!HasAuthorizationOptions(options))
+            {
+                return null;
+            }
+
+            IdentificatorDrepturi rights = new IdentificatorDrepturi();
+            rights.CUI = RequiredOption(options, "cui");
+            rights.NumarContract = RequiredOption(options, "contract");
+            rights.DataContract = DateTime.Parse(RequiredOption(options, "contract-date"), CultureInfo.InvariantCulture);
+            rights.CasaAsigurare = RequiredOption(options, "cas");
+            rights.TipFurnizor = RequiredOption(options, "tip-furnizor");
+
+            string obtainedToken = session.ObtineToken(rights.CUI, rights);
+            return new Dictionary<string, object>
+            {
+                { "mode", "obtine-token" },
+                { "cui", rights.CUI },
+                { "contract", rights.NumarContract },
+                { "contractDate", rights.DataContract.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) },
+                { "cas", rights.CasaAsigurare },
+                { "tipFurnizor", rights.TipFurnizor },
+                { "tokenReceived", !String.IsNullOrWhiteSpace(obtainedToken) },
+                { "tokenLength", String.IsNullOrWhiteSpace(obtainedToken) ? 0 : obtainedToken.Length }
+            };
+        }
+
+        private static bool HasAuthorizationOptions(Dictionary<string, string> options)
+        {
+            return GetOption(options, "cui", null) != null
+                || GetOption(options, "contract", null) != null
+                || GetOption(options, "contract-date", null) != null
+                || GetOption(options, "cas", null) != null
+                || GetOption(options, "tip-furnizor", null) != null
+                || GetOption(options, "token", null) != null;
+        }
+
+        private static string RequiredOption(Dictionary<string, string> options, string key)
+        {
+            string value = GetOption(options, key, null);
+            if (String.IsNullOrWhiteSpace(value))
+            {
+                throw new ArgumentException("Missing --" + key + " for card session authorization.");
+            }
+            return value;
+        }
         private static Dictionary<string, object> DescribeSession(ISesiuneCard session)
         {
             Dictionary<string, object> status = new Dictionary<string, object>();
@@ -427,6 +514,11 @@ namespace RoSiui.ECardBridge
 
         private static string ResolvePin(Dictionary<string, string> options)
         {
+            if (UseTerminalPin(options))
+            {
+                return null;
+            }
+
             string pinEnv = GetOption(options, "pin-env", null);
             if (!String.IsNullOrWhiteSpace(pinEnv))
             {
@@ -434,6 +526,12 @@ namespace RoSiui.ECardBridge
             }
 
             return GetOption(options, "pin", null);
+        }
+
+        private static bool UseTerminalPin(Dictionary<string, string> options)
+        {
+            string value = GetOption(options, "pin-terminal", null);
+            return value != null && !String.Equals(value, "false", StringComparison.OrdinalIgnoreCase);
         }
 
         private static void PrintJson(object payload)
@@ -541,3 +639,4 @@ namespace RoSiui.ECardBridge
         }
     }
 }
+
